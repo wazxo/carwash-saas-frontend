@@ -58,6 +58,7 @@ const plans = [
 export default function BillingSettingsPage() {
   const { user } = useAuthStore();
   const searchParams = useSearchParams();
+  const tenantId = user?.tenantId || null;
   const [tenant, setTenant] = useState<TenantBillingRecord | null>(null);
   const [selectedPlan, setSelectedPlan] = useState("starter");
   const [todayTimestamp] = useState(() => Date.now());
@@ -67,7 +68,6 @@ export default function BillingSettingsPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const tenantId = user?.tenantId;
     if (!tenantId) return;
     let cancelled = false;
 
@@ -93,7 +93,7 @@ export default function BillingSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.tenantId]);
+  }, [tenantId]);
 
   const paypalState = searchParams.get("paypal");
   const paypalSuccessMessage =
@@ -142,6 +142,10 @@ export default function BillingSettingsPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (!tenantId) {
+    return <div className="p-8 text-sm text-destructive">No tenant context found for this account.</div>;
   }
 
   if (loading) {

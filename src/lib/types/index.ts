@@ -136,6 +136,10 @@ export interface Payment {
 export interface Receipt {
   id: string;
   receiptNumber: string;
+  ncf?: string | null;
+  fiscalDocumentType?: string | null;
+  issuerSnapshot?: Record<string, string | null> | null;
+  customerSnapshot?: Record<string, string | null> | null;
   subtotal: number;
   taxAmount: number;
   discountAmount: number;
@@ -239,6 +243,16 @@ export interface Location {
   address?: string;
   phone?: string;
   isActive?: boolean;
+}
+
+export interface TenantBranding {
+  id: string;
+  name: string;
+  legalName?: string | null;
+  slug: string;
+  description?: string | null;
+  rnc?: string | null;
+  logoUrl?: string | null;
 }
 
 export interface SupportTicket {

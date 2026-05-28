@@ -83,6 +83,12 @@ export default function ReportsPage() {
   const [staff, setStaff] = useState<StaffReportRow[]>([]);
   const [popularServices, setPopularServices] = useState<PopularServiceRow[]>([]);
 
+  function downloadWorkbook() {
+    const params = new URLSearchParams({ from, to });
+    if (locationId) params.set("locationId", locationId);
+    window.open(`/api/reports/operations.xlsx?${params.toString()}`, "_blank");
+  }
+
   async function loadReports(nextFrom = from, nextTo = to, nextLocationId = locationId) {
     setLoading(true);
     setError(null);
@@ -178,6 +184,13 @@ export default function ReportsPage() {
         </div>
         <Button variant="outline" onClick={() => loadReports()}>
           Refresh
+        </Button>
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={downloadWorkbook} className="gap-2">
+          <Download className="h-4 w-4" />
+          Download Excel Workbook
         </Button>
       </div>
 

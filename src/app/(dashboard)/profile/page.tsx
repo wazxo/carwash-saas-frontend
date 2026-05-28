@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { normalizeMediaUrl } from "@/lib/utils";
 import { User, Camera, Lock, Shield, Smartphone, Trash2 } from "lucide-react";
 import type { User as UserType, ApiResponse } from "@/lib/types";
 
@@ -48,7 +49,10 @@ export default function ProfilePage() {
   const [disableTwoFactorPassword, setDisableTwoFactorPassword] = useState("");
 
   const avatarPreview = useMemo(
-    () => (avatarFile ? URL.createObjectURL(avatarFile) : profile?.avatar || null),
+    () =>
+      avatarFile
+        ? URL.createObjectURL(avatarFile)
+        : normalizeMediaUrl(profile?.avatar) || null,
     [avatarFile, profile?.avatar]
   );
 

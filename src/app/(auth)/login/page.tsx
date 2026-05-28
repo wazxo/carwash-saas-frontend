@@ -9,6 +9,7 @@ import { FormField } from "@/components/forms/form-field";
 import { apiFetch } from "@/lib/api/client";
 import { useApi } from "@/hooks/use-api";
 import { useAuthStore } from "@/lib/auth/store";
+import { assertTokenPayload, unwrapAuthPayload } from "@/lib/auth/responses";
 import type { ApiResponse, User } from "@/lib/types";
 
 type LoginSuccessData = {
@@ -50,12 +51,15 @@ export default function LoginPage() {
       apiFetch<LoginResponse>("/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
+        auth: false,
+        suppressAuthRedirect: true,
+        suppressTokenRefresh: true,
       })
     );
 
     if (!result) return;
 
-    const data = result.data;
+    const data = unwrapAuthPayload(result.data);
 
     if ("requiresTwoFactor" in data && data.requiresTwoFactor) {
       router.push(
@@ -65,9 +69,13 @@ export default function LoginPage() {
     }
 
     // Backend login only returns tokens — fetch user separately
-    const { accessToken, refreshToken } = data as LoginSuccessData;
+    assertTokenPayload(data);
+    const { accessToken, refreshToken } = data;
     const meRes = await apiFetch<ApiResponse<User>>("/auth/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
+      auth: false,
+      suppressAuthRedirect: true,
+      suppressTokenRefresh: true,
     });
     useAuthStore.getState().setAuth(meRes.data, { accessToken, refreshToken });
     router.push("/dashboard");

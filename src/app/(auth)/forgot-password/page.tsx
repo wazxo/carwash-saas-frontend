@@ -31,6 +31,9 @@ export default function ForgotPasswordPage() {
       apiFetch<ApiResponse<{ message?: string }>>("/auth/forgot-password", {
         method: "POST",
         body: JSON.stringify({ email }),
+        auth: false,
+        suppressAuthRedirect: true,
+        suppressTokenRefresh: true,
       })
     );
 

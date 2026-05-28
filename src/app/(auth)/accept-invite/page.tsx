@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api/client";
 import { useApi } from "@/hooks/use-api";
 import { useAuthStore } from "@/lib/auth/store";
+import { assertTokenPayload, unwrapAuthPayload } from "@/lib/auth/responses";
 import type { ApiResponse, User } from "@/lib/types";
 
 type AcceptInviteData = {
@@ -47,6 +48,9 @@ function AcceptInviteForm() {
       try {
         const res = await apiFetch<{ data: InvitePreview }>(`/auth/invite-preview?token=${encodeURIComponent(token)}`, {
           headers: { Accept: "application/json" },
+          auth: false,
+          suppressAuthRedirect: true,
+          suppressTokenRefresh: true,
         });
         setInvitePreview(res.data);
       } catch {
@@ -80,14 +84,22 @@ function AcceptInviteForm() {
       apiFetch<ApiResponse<AcceptInviteData>>("/auth/register-invite", {
         method: "POST",
         body: JSON.stringify({ token, firstName, lastName, password }),
+        auth: false,
+        suppressAuthRedirect: true,
+        suppressTokenRefresh: true,
       })
     );
 
     if (!result) return;
 
-    const { accessToken, refreshToken } = result.data;
+    const payload = unwrapAuthPayload(result.data);
+    assertTokenPayload(payload);
+    const { accessToken, refreshToken } = payload;
     const meRes = await apiFetch<ApiResponse<User>>("/auth/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
+      auth: false,
+      suppressAuthRedirect: true,
+      suppressTokenRefresh: true,
     });
     useAuthStore.getState().setAuth(meRes.data, { accessToken, refreshToken });
     router.push("/dashboard");

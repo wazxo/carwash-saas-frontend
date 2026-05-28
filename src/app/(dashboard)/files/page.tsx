@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api/client";
+import { AuthenticatedImage } from "@/components/media/authenticated-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,15 +28,38 @@ export default function FilesPage() {
       const res = await apiFetch<PaginatedResponse<MediaFile>>(`/files?page=${page}&limit=20`);
       setFiles(res.data ?? []);
       setMeta(res.meta ?? meta);
-    } catch (err: any) {
-      setError(err.message || "Failed to load files");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load files");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchFiles();
+    let cancelled = false;
+
+    async function loadInitialFiles() {
+      setLoading(true);
+      try {
+        const res = await apiFetch<PaginatedResponse<MediaFile>>(`/files?page=1&limit=20`);
+        if (!cancelled) {
+          setFiles(res.data ?? []);
+          setMeta(res.meta ?? { total: 0, page: 1, limit: 20, totalPages: 1 });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load files");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadInitialFiles();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -55,8 +79,8 @@ export default function FilesPage() {
       setEntityType("");
       setEntityId("");
       fetchFiles(meta.page);
-    } catch (err: any) {
-      alert(err.message || "Failed to upload file");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to upload file");
     } finally {
       setUploading(false);
     }
@@ -67,8 +91,8 @@ export default function FilesPage() {
     try {
       await apiFetch<ApiResponse<unknown>>(`/files/${id}`, { method: "DELETE" });
       fetchFiles(meta.page);
-    } catch (err: any) {
-      alert(err.message || "Failed to delete file");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete file");
     }
   };
 
@@ -128,9 +152,11 @@ export default function FilesPage() {
           <Card key={f.id} className="overflow-hidden">
             <div className="aspect-square bg-muted relative">
               {isImage(f.mimeType) ? (
-                <img
-                  src={`/api/files/${f.id}/download`}
+                <AuthenticatedImage
+                  fileId={f.id}
                   alt={f.filename}
+                  width={320}
+                  height={320}
                   className="w-full h-full object-cover"
                 />
               ) : (

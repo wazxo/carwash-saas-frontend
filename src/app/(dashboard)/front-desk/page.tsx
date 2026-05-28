@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { fiscalDocumentTypeHelp, validateDominicanTaxId } from "@/lib/fiscal";
 import type { Customer, Location, Receipt, Service, Vehicle, WashOrder } from "@/lib/types";
 import {
   AlertCircle,
@@ -67,6 +68,11 @@ export default function FrontDeskPage() {
     amount: "",
     method: "cash",
     tipAmount: "",
+    fiscalDocumentType: "B02",
+    customerLegalName: "",
+    customerTaxId: "",
+    customerEmail: "",
+    customerPhone: "",
   });
 
   const vehiclePhotoPreview = useMemo(
@@ -179,6 +185,7 @@ export default function FrontDeskPage() {
   const currentOrderRemaining = currentOrder
     ? Math.max(0, Number(currentOrder.finalAmount) - currentOrderPaid)
     : 0;
+  const frontDeskTaxIdValidation = validateDominicanTaxId(paymentForm.customerTaxId);
 
   function resetDeskFlow() {
     setSelectedCustomerId("");
@@ -186,7 +193,7 @@ export default function FrontDeskPage() {
     setVehicles([]);
     setCurrentOrder(null);
     setReceipt(null);
-    setPaymentForm({ amount: "", method: "cash", tipAmount: "" });
+    setPaymentForm({ amount: "", method: "cash", tipAmount: "", fiscalDocumentType: "B02", customerLegalName: "", customerTaxId: "", customerEmail: "", customerPhone: "" });
     setOrderForm((current) => ({
       ...current,
       notes: "",
@@ -329,6 +336,9 @@ export default function FrontDeskPage() {
       setPaymentForm((current) => ({
         ...current,
         amount: Number(res.data.finalAmount).toFixed(2),
+        customerLegalName: selectedCustomer?.name || current.customerLegalName,
+        customerEmail: selectedCustomer?.email || current.customerEmail,
+        customerPhone: selectedCustomer?.phone || current.customerPhone,
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create order");
@@ -343,6 +353,14 @@ export default function FrontDeskPage() {
       setError("Create an order before registering payment");
       return;
     }
+    if (currentOrderRemaining <= 0) {
+      setError("This order is already fully paid.");
+      return;
+    }
+    if (paymentForm.customerTaxId && !frontDeskTaxIdValidation.valid) {
+      setError("Customer tax ID must be a valid Dominican RNC or cédula.");
+      return;
+    }
 
     setRegisteringPayment(true);
     setError(null);
@@ -355,6 +373,11 @@ export default function FrontDeskPage() {
           amount: Number(paymentForm.amount),
           method: paymentForm.method,
           tipAmount: Number(paymentForm.tipAmount || 0),
+          fiscalDocumentType: paymentForm.fiscalDocumentType,
+          customerLegalName: paymentForm.customerLegalName || undefined,
+          customerTaxId: paymentForm.customerTaxId || undefined,
+          customerEmail: paymentForm.customerEmail || undefined,
+          customerPhone: paymentForm.customerPhone || undefined,
         }),
       });
 
@@ -363,7 +386,16 @@ export default function FrontDeskPage() {
         apiFetch<{ data: Receipt[] }>(`/receipts/order/${currentOrder.id}`),
       ]);
 
+      const nextPaid = (orderRes.data.payments ?? []).reduce(
+        (sum, payment) => sum + Number(payment.amount),
+        0
+      );
+      const nextRemaining = Math.max(0, Number(orderRes.data.finalAmount) - nextPaid);
       setCurrentOrder(orderRes.data);
+      setPaymentForm((current) => ({
+        ...current,
+        amount: nextRemaining > 0 ? nextRemaining.toFixed(2) : "",
+      }));
       setReceipt(receiptRes.data[0] ?? null);
     } catch (err) {
       setError(
@@ -822,6 +854,54 @@ export default function FrontDeskPage() {
                   </div>
 
                   <div className="space-y-2">
+                    <Label>Fiscal Document Type</Label>
+                    <select
+                      className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      value={paymentForm.fiscalDocumentType}
+                      onChange={(e) =>
+                        setPaymentForm((current) => ({ ...current, fiscalDocumentType: e.target.value }))
+                      }
+                    >
+                      <option value="B02">B02 - Consumo</option>
+                      <option value="B01">B01 - Credito fiscal</option>
+                      <option value="B14">B14 - Regimen especial</option>
+                      <option value="B15">B15 - Gubernamental</option>
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      {fiscalDocumentTypeHelp[paymentForm.fiscalDocumentType]?.description}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Customer Legal Name</Label>
+                    <Input
+                      value={paymentForm.customerLegalName}
+                      onChange={(e) =>
+                        setPaymentForm((current) => ({ ...current, customerLegalName: e.target.value }))
+                      }
+                      placeholder="Razón social o nombre fiscal"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Customer Tax ID</Label>
+                    <Input
+                      value={paymentForm.customerTaxId}
+                      onChange={(e) =>
+                        setPaymentForm((current) => ({ ...current, customerTaxId: e.target.value }))
+                      }
+                      placeholder="RNC o cédula"
+                    />
+                    {paymentForm.customerTaxId ? (
+                      <p className={`text-xs ${frontDeskTaxIdValidation.valid ? "text-emerald-400" : "text-destructive"}`}>
+                        {frontDeskTaxIdValidation.valid
+                          ? `${frontDeskTaxIdValidation.type} válido`
+                          : "RNC o cédula inválido"}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-2">
                     <Label>Method</Label>
                     <select
                       className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -848,8 +928,31 @@ export default function FrontDeskPage() {
                     />
                   </div>
 
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Customer Email</Label>
+                      <Input
+                        value={paymentForm.customerEmail}
+                        onChange={(e) =>
+                          setPaymentForm((current) => ({ ...current, customerEmail: e.target.value }))
+                        }
+                        placeholder="Email opcional"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Customer Phone</Label>
+                      <Input
+                        value={paymentForm.customerPhone}
+                        onChange={(e) =>
+                          setPaymentForm((current) => ({ ...current, customerPhone: e.target.value }))
+                        }
+                        placeholder="Teléfono opcional"
+                      />
+                    </div>
+                  </div>
+
                   <Button type="submit" disabled={registeringPayment} className="w-full">
-                    {registeringPayment ? "Processing..." : "Register Payment"}
+                    {registeringPayment ? "Processing..." : currentOrderRemaining <= 0 ? "Already Paid" : "Register Payment"}
                   </Button>
                 </form>
               ) : (
@@ -876,6 +979,7 @@ export default function FrontDeskPage() {
                     <p className="text-xs text-muted-foreground font-mono">
                       {receipt.receiptNumber}
                     </p>
+                    {receipt.ncf ? <p className="text-xs text-primary font-mono">NCF: {receipt.ncf}</p> : null}
                   </div>
                   <div className="space-y-2 text-sm">
                     {receipt.items.map((item, index) => (
@@ -902,6 +1006,15 @@ export default function FrontDeskPage() {
                       <span>${Number(receipt.tipAmount).toFixed(2)}</span>
                     </div>
                   </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full gap-2"
+                    onClick={() => window.open(`/receipts/${receipt.id}/print`, "_blank")}
+                  >
+                    <ReceiptIcon className="h-4 w-4" />
+                    Print Fiscal Invoice
+                  </Button>
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-border bg-background/30 p-6 text-sm text-muted-foreground">

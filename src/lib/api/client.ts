@@ -2,33 +2,40 @@ import { useAuthStore } from "@/lib/auth/store";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
+type ApiFetchOptions = RequestInit & {
+  auth?: boolean;
+  suppressAuthRedirect?: boolean;
+  suppressTokenRefresh?: boolean;
+};
+
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit = {}
+  options: ApiFetchOptions = {}
 ): Promise<T> {
+  const { auth = true, suppressAuthRedirect = false, suppressTokenRefresh = false, ...requestInit } = options;
   const accessToken = useAuthStore.getState().accessToken;
 
   const headers: Record<string, string> = {
     Accept: "application/json",
-    ...(options.headers as Record<string, string>),
+    ...(requestInit.headers as Record<string, string>),
   };
 
-  if (accessToken && !headers["Authorization"]) {
+  if (auth && accessToken && !headers["Authorization"]) {
     headers["Authorization"] = `Bearer ${accessToken}`;
   }
 
-  if (options.body && typeof options.body === "string") {
+  if (requestInit.body && typeof requestInit.body === "string") {
     headers["Content-Type"] = "application/json";
   }
 
   const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
+    ...requestInit,
     headers,
   });
 
   if (res.status === 401) {
     const refreshToken = useAuthStore.getState().refreshToken;
-    if (refreshToken) {
+    if (!suppressTokenRefresh && refreshToken) {
       const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -42,11 +49,15 @@ export async function apiFetch<T>(
         return apiFetch(path, options);
       }
     }
+    const error = await res.json().catch(() => ({ message: "Unauthorized" }));
+    if (suppressAuthRedirect) {
+      throw new Error(error.message || "Unauthorized");
+    }
     useAuthStore.getState().clearAuth();
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
-    throw new Error("Session expired");
+    throw new Error(error.message || "Session expired");
   }
 
   if (!res.ok) {

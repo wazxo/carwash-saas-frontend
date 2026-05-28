@@ -9,6 +9,7 @@ import { FormField } from "@/components/forms/form-field";
 import { apiFetch } from "@/lib/api/client";
 import { useApi } from "@/hooks/use-api";
 import { useAuthStore } from "@/lib/auth/store";
+import { assertTokenPayload, unwrapAuthPayload } from "@/lib/auth/responses";
 import type { ApiResponse, User } from "@/lib/types";
 
 type RegisterData = {
@@ -57,14 +58,22 @@ export default function RegisterPage() {
       apiFetch<RegisterResponse>("/auth/register", {
         method: "POST",
         body: JSON.stringify({ firstName, lastName, email, password, plan }),
+        auth: false,
+        suppressAuthRedirect: true,
+        suppressTokenRefresh: true,
       })
     );
 
     if (!result) return;
 
-    const { accessToken, refreshToken } = result.data;
+    const payload = unwrapAuthPayload(result.data);
+    assertTokenPayload(payload);
+    const { accessToken, refreshToken } = payload;
     const meRes = await apiFetch<ApiResponse<User>>("/auth/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
+      auth: false,
+      suppressAuthRedirect: true,
+      suppressTokenRefresh: true,
     });
     useAuthStore.getState().setAuth(meRes.data, { accessToken, refreshToken });
     router.push(`/verify-email?email=${encodeURIComponent(email)}`);

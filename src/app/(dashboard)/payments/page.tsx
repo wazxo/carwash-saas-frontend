@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { fiscalDocumentTypeHelp, validateDominicanTaxId } from "@/lib/fiscal";
 import type { WashOrder, Payment } from "@/lib/types";
 import {
   CreditCard,
@@ -29,6 +30,11 @@ export default function PaymentsPage() {
     amount: "",
     method: "cash",
     tipAmount: "",
+    fiscalDocumentType: "B02",
+    customerLegalName: "",
+    customerTaxId: "",
+    customerEmail: "",
+    customerPhone: "",
   });
 
   useEffect(() => {
@@ -78,9 +84,18 @@ export default function PaymentsPage() {
           selectedOrderPaid
       )
     : 0;
+  const taxIdValidation = validateDominicanTaxId(form.customerTaxId);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!selectedOrder || selectedOrderRemaining <= 0) {
+      setError("This order is already fully paid.");
+      return;
+    }
+    if (form.customerTaxId && !taxIdValidation.valid) {
+      setError("Customer tax ID must be a valid Dominican RNC or cédula.");
+      return;
+    }
     setSubmitting(true);
     try {
       await apiFetch("/payments", {
@@ -90,9 +105,14 @@ export default function PaymentsPage() {
           amount: Number(form.amount),
           method: form.method,
           tipAmount: Number(form.tipAmount || 0),
+          fiscalDocumentType: form.fiscalDocumentType,
+          customerLegalName: form.customerLegalName || undefined,
+          customerTaxId: form.customerTaxId || undefined,
+          customerEmail: form.customerEmail || undefined,
+          customerPhone: form.customerPhone || undefined,
         }),
       });
-      setForm({ orderId: "", amount: "", method: "cash", tipAmount: "" });
+      setForm({ orderId: "", amount: "", method: "cash", tipAmount: "", fiscalDocumentType: "B02", customerLegalName: "", customerTaxId: "", customerEmail: "", customerPhone: "" });
       const [oRes, pRes] = await Promise.all([
         apiFetch<{ data: WashOrder[] }>("/wash-orders?page=1&limit=100"),
         apiFetch<{ data: Payment[] }>("/payments?page=1&limit=20"),
@@ -138,9 +158,26 @@ export default function PaymentsPage() {
                   id="orderId"
                   className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={form.orderId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, orderId: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const nextOrder = orders.find((order) => order.id === e.target.value);
+                    const nextPaid = (nextOrder?.payments ?? []).reduce(
+                      (sum, payment) => sum + Number(payment.amount),
+                      0
+                    );
+                    const nextRemaining = nextOrder
+                      ? Math.max(0, Number(nextOrder.finalAmount ?? nextOrder.totalAmount) - nextPaid)
+                      : 0;
+
+                    setForm((f) => ({
+                      ...f,
+                      orderId: e.target.value,
+                      amount: nextRemaining > 0 ? nextRemaining.toFixed(2) : "",
+                      customerLegalName: nextOrder?.customer?.name || "",
+                      customerTaxId: "",
+                      customerEmail: "",
+                      customerPhone: nextOrder?.customer?.phone || "",
+                    }));
+                  }}
                   required
                 >
                   <option value="">Select order</option>
@@ -166,6 +203,40 @@ export default function PaymentsPage() {
                     </div>
                   </div>
                 )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="fiscalType">Fiscal Document Type</Label>
+                <select
+                  id="fiscalType"
+                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                  value={form.fiscalDocumentType}
+                  onChange={(e) => setForm((f) => ({ ...f, fiscalDocumentType: e.target.value }))}
+                >
+                  <option value="B02">B02 - Consumo</option>
+                  <option value="B01">B01 - Credito fiscal</option>
+                  <option value="B14">B14 - Regimen especial</option>
+                  <option value="B15">B15 - Gubernamental</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {fiscalDocumentTypeHelp[form.fiscalDocumentType]?.description}
+                </p>
+              </div>
+              <div className="grid gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="customerLegalName">Customer Legal Name</Label>
+                  <Input id="customerLegalName" value={form.customerLegalName} onChange={(e) => setForm((f) => ({ ...f, customerLegalName: e.target.value }))} placeholder={selectedOrder?.customer?.name || "Cliente / razón social"} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="customerTaxId">Customer Tax ID</Label>
+                  <Input id="customerTaxId" value={form.customerTaxId} onChange={(e) => setForm((f) => ({ ...f, customerTaxId: e.target.value }))} placeholder="RNC o cédula" />
+                  {form.customerTaxId ? (
+                    <p className={`text-xs ${taxIdValidation.valid ? "text-emerald-400" : "text-destructive"}`}>
+                      {taxIdValidation.valid
+                        ? `${taxIdValidation.type} válido`
+                        : "RNC o cédula inválido"}
+                    </p>
+                  ) : null}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="amount">Amount ($)</Label>
@@ -211,9 +282,24 @@ export default function PaymentsPage() {
                   placeholder="0.00"
                 />
               </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="customerEmail">Customer Email</Label>
+                  <Input id="customerEmail" value={form.customerEmail} onChange={(e) => setForm((f) => ({ ...f, customerEmail: e.target.value }))} placeholder={selectedOrder?.customer?.phone ? "Opcional" : "Email opcional"} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="customerPhone">Customer Phone</Label>
+                  <Input id="customerPhone" value={form.customerPhone} onChange={(e) => setForm((f) => ({ ...f, customerPhone: e.target.value }))} placeholder={selectedOrder?.customer?.phone || "Teléfono opcional"} />
+                </div>
+              </div>
               <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Processing..." : "Register Payment"}
+                {submitting ? "Processing..." : selectedOrderRemaining <= 0 && selectedOrder ? "Already Paid" : "Register Payment"}
               </Button>
+              {selectedOrder?.paymentStatus ? (
+                <p className="text-xs text-muted-foreground text-center">
+                  Current payment status: <span className="font-medium capitalize">{selectedOrder.paymentStatus}</span>
+                </p>
+              ) : null}
             </form>
           </CardContent>
         </Card>

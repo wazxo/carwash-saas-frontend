@@ -10,11 +10,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api/client";
 import { useApi } from "@/hooks/use-api";
 import { useAuthStore } from "@/lib/auth/store";
+import { assertTokenPayload, unwrapAuthPayload } from "@/lib/auth/responses";
 import type { ApiResponse, User } from "@/lib/types";
 
 type VerifyResponse = ApiResponse<{
   accessToken: string;
   refreshToken: string;
+}>;
+
+type VerifyEmailMessageResponse = ApiResponse<{
+  message?: string;
 }>;
 
 function VerifyEmailForm() {
@@ -27,7 +32,7 @@ function VerifyEmailForm() {
 
   const is2FA = mode === "2fa";
 
-  const { loading, error, execute } = useApi<VerifyResponse>();
+  const { loading, error, execute } = useApi<VerifyResponse | VerifyEmailMessageResponse>();
   const {
     loading: resendLoading,
     error: resendError,
@@ -56,33 +61,53 @@ function VerifyEmailForm() {
     if (!validate()) return;
 
     if (is2FA) {
-      const result = await execute(
+      const result = (await execute(
         apiFetch<VerifyResponse>("/auth/verify-2fa", {
           method: "POST",
           body: JSON.stringify({ tempToken, code, trustDevice: true }),
+          auth: false,
+          suppressAuthRedirect: true,
+          suppressTokenRefresh: true,
         })
-      );
+      )) as VerifyResponse | null;
       if (!result) return;
-      const { accessToken, refreshToken } = result.data;
+      const payload = unwrapAuthPayload(result.data);
+      assertTokenPayload(payload);
+      const { accessToken, refreshToken } = payload;
       const meRes = await apiFetch<ApiResponse<User>>("/auth/me", {
         headers: { Authorization: `Bearer ${accessToken}` },
+        auth: false,
+        suppressAuthRedirect: true,
+        suppressTokenRefresh: true,
       });
       useAuthStore.getState().setAuth(meRes.data, { accessToken, refreshToken });
       router.push("/dashboard");
     } else {
       const result = await execute(
-        apiFetch<VerifyResponse>("/auth/verify-email", {
+        apiFetch<VerifyEmailMessageResponse>("/auth/verify-email", {
           method: "POST",
           body: JSON.stringify({ token: code, email }),
+          auth: false,
+          suppressAuthRedirect: true,
+          suppressTokenRefresh: true,
         })
       );
       if (!result) return;
-      const { accessToken, refreshToken } = result.data;
-      const meRes = await apiFetch<ApiResponse<User>>("/auth/me", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      useAuthStore.getState().setAuth(meRes.data, { accessToken, refreshToken });
-      router.push("/dashboard");
+      const accessToken = useAuthStore.getState().accessToken;
+      const refreshToken = useAuthStore.getState().refreshToken;
+
+      if (accessToken && refreshToken) {
+        const meRes = await apiFetch<ApiResponse<User>>("/auth/me", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          auth: false,
+          suppressAuthRedirect: true,
+          suppressTokenRefresh: true,
+        });
+        useAuthStore.getState().setAuth(meRes.data, { accessToken, refreshToken });
+        router.push("/dashboard");
+      } else {
+        setSuccessMessage("Email verified successfully. You can now sign in.");
+      }
     }
   };
 
@@ -94,18 +119,34 @@ function VerifyEmailForm() {
         apiFetch<ApiResponse<unknown>>("/auth/resend-2fa", {
           method: "POST",
           body: JSON.stringify({ tempToken }),
+          auth: false,
+          suppressAuthRedirect: true,
+          suppressTokenRefresh: true,
         })
       );
-      if (result) setSuccessMessage("A new code has been sent.");
+      if (result) {
+        const payload = "data" in result ? result.data : result;
+        setSuccessMessage(
+          (payload as { message?: string })?.message || "A new code has been sent."
+        );
+      }
     } else {
       if (!email) return;
       const result = await executeResend(
         apiFetch<ApiResponse<unknown>>("/auth/resend-verification", {
           method: "POST",
           body: JSON.stringify({ email }),
+          auth: false,
+          suppressAuthRedirect: true,
+          suppressTokenRefresh: true,
         })
       );
-      if (result) setSuccessMessage("A new verification code has been sent.");
+      if (result) {
+        const payload = "data" in result ? result.data : result;
+        setSuccessMessage(
+          (payload as { message?: string })?.message || "A new verification code has been sent."
+        );
+      }
     }
   };
 

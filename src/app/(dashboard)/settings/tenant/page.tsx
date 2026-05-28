@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { apiFetch } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth/store";
 import { Button } from "@/components/ui/button";
@@ -9,8 +10,9 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { normalizeMediaUrl } from "@/lib/utils";
 import { Building2, CheckCircle2, MapPin, Settings, Sparkles, Wrench } from "lucide-react";
-import type { ApiResponse, Location, Service } from "@/lib/types";
+import type { ApiResponse, Location, Service, TenantBranding } from "@/lib/types";
 
 type TenantSettingsShape = {
   businessPhone?: string;
@@ -18,14 +20,18 @@ type TenantSettingsShape = {
   businessAddress?: string;
   currency?: string;
   timezone?: string;
+  defaultFiscalDocumentType?: string;
   onboardingCompleted?: boolean;
 };
 
 type TenantRecord = {
   id: string;
   name: string;
+  legalName?: string | null;
   slug: string;
   description?: string | null;
+  rnc?: string | null;
+  logoUrl?: string | null;
   settings?: TenantSettingsShape;
 };
 
@@ -52,6 +58,7 @@ const defaultServices = [
 
 export default function TenantSettingsPage() {
   const { user } = useAuthStore();
+  const tenantId = user?.tenantId || null;
   const [tenant, setTenant] = useState<TenantRecord | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -60,16 +67,21 @@ export default function TenantSettingsPage() {
   const [savingBusiness, setSavingBusiness] = useState(false);
   const [savingLocation, setSavingLocation] = useState(false);
   const [savingService, setSavingService] = useState(false);
+  const [savingBranding, setSavingBranding] = useState(false);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
 
   const [businessForm, setBusinessForm] = useState({
     name: "",
     slug: "",
     description: "",
+    legalName: "",
+    rnc: "",
     businessPhone: "",
     businessEmail: "",
     businessAddress: "",
     currency: "USD",
     timezone: "UTC",
+    defaultFiscalDocumentType: "B02",
   });
 
   const [locationForm, setLocationForm] = useState({
@@ -100,13 +112,16 @@ export default function TenantSettingsPage() {
     setServices(servicesRes.data);
     setBusinessForm({
       name: tenantData.name || "",
+      legalName: tenantData.legalName || "",
       slug: tenantData.slug || "",
       description: tenantData.description || "",
+      rnc: tenantData.rnc || "",
       businessPhone: settings.businessPhone || "",
       businessEmail: settings.businessEmail || "",
       businessAddress: settings.businessAddress || "",
       currency: settings.currency || "USD",
       timezone: settings.timezone || "UTC",
+      defaultFiscalDocumentType: settings.defaultFiscalDocumentType || "B02",
     });
 
     if (locationsRes.data[0]) {
@@ -119,7 +134,6 @@ export default function TenantSettingsPage() {
   }
 
   useEffect(() => {
-    const tenantId = user?.tenantId;
     if (!tenantId) return;
     let cancelled = false;
 
@@ -141,13 +155,16 @@ export default function TenantSettingsPage() {
           setServices(servicesRes.data);
           setBusinessForm({
             name: tenantData.name || "",
+            legalName: tenantData.legalName || "",
             slug: tenantData.slug || "",
             description: tenantData.description || "",
+            rnc: tenantData.rnc || "",
             businessPhone: settings.businessPhone || "",
             businessEmail: settings.businessEmail || "",
             businessAddress: settings.businessAddress || "",
             currency: settings.currency || "USD",
             timezone: settings.timezone || "UTC",
+            defaultFiscalDocumentType: settings.defaultFiscalDocumentType || "B02",
           });
 
           if (locationsRes.data[0]) {
@@ -172,7 +189,7 @@ export default function TenantSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.tenantId]);
+  }, [tenantId]);
 
   const setupChecklist = useMemo(
     () => [
@@ -198,6 +215,7 @@ export default function TenantSettingsPage() {
   );
 
   const completedSteps = setupChecklist.filter((item) => item.done).length;
+  const logoPreview = normalizeMediaUrl(tenant?.logoUrl) || null;
 
   const markOnboardingComplete = async (tenantId: string) => {
     await apiFetch<ApiResponse<TenantRecord>>(`/tenants/${tenantId}`, {
@@ -226,8 +244,10 @@ export default function TenantSettingsPage() {
         method: "PATCH",
         body: JSON.stringify({
           name: businessForm.name,
+          legalName: businessForm.legalName,
           slug: businessForm.slug,
           description: businessForm.description,
+          rnc: businessForm.rnc,
           settings: {
             ...(tenant?.settings || {}),
             businessPhone: businessForm.businessPhone,
@@ -235,6 +255,7 @@ export default function TenantSettingsPage() {
             businessAddress: businessForm.businessAddress,
             currency: businessForm.currency,
             timezone: businessForm.timezone,
+            defaultFiscalDocumentType: businessForm.defaultFiscalDocumentType,
           },
         }),
       });
@@ -248,6 +269,33 @@ export default function TenantSettingsPage() {
       setError(err instanceof Error ? err.message : "Failed to update tenant");
     } finally {
       setSavingBusiness(false);
+    }
+  };
+
+  const handleBrandingUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.tenantId || !logoFile) return;
+    setSavingBranding(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", logoFile);
+      formData.append("entityType", "tenant_logo");
+      formData.append("entityId", user.tenantId);
+      const uploadRes = await apiFetch<ApiResponse<{ downloadUrl: string }>>("/files/upload", {
+        method: "POST",
+        body: formData,
+      });
+      await apiFetch<ApiResponse<TenantBranding>>(`/tenants/${user.tenantId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ logoUrl: uploadRes.data.downloadUrl }),
+      });
+      setLogoFile(null);
+      await loadSetupData(user.tenantId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to upload tenant logo");
+    } finally {
+      setSavingBranding(false);
     }
   };
 
@@ -323,7 +371,9 @@ export default function TenantSettingsPage() {
         )}
       </div>
 
-      {loading && (
+      {!tenantId && <p className="text-destructive text-sm">No tenant context found for this account.</p>}
+
+      {tenantId && loading && (
         <div className="grid gap-4 xl:grid-cols-3">
           {Array.from({ length: 4 }).map((_, index) => (
             <Skeleton key={index} className="h-64 w-full" />
@@ -333,7 +383,7 @@ export default function TenantSettingsPage() {
 
       {error && <p className="text-destructive text-sm">{error}</p>}
 
-      {!loading && tenant && (
+      {tenantId && !loading && tenant && (
         <>
           <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
             <Card className="bg-card/60 border-border/60">
@@ -414,6 +464,16 @@ export default function TenantSettingsPage() {
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label>Legal Name</Label>
+                    <Input
+                      value={businessForm.legalName}
+                      onChange={(e) =>
+                        setBusinessForm((current) => ({ ...current, legalName: e.target.value }))
+                      }
+                      placeholder="Razón social"
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <Label>Slug</Label>
                     <Input
                       value={businessForm.slug}
@@ -421,6 +481,16 @@ export default function TenantSettingsPage() {
                         setBusinessForm((current) => ({ ...current, slug: e.target.value }))
                       }
                       required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>RNC</Label>
+                    <Input
+                      value={businessForm.rnc}
+                      onChange={(e) =>
+                        setBusinessForm((current) => ({ ...current, rnc: e.target.value }))
+                      }
+                      placeholder="131234567"
                     />
                   </div>
                   <div className="space-y-2">
@@ -482,6 +552,21 @@ export default function TenantSettingsPage() {
                           setBusinessForm((current) => ({ ...current, timezone: e.target.value }))
                         }
                       />
+                    </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>Default Fiscal Document Type</Label>
+                      <select
+                        className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                        value={businessForm.defaultFiscalDocumentType}
+                        onChange={(e) =>
+                          setBusinessForm((current) => ({ ...current, defaultFiscalDocumentType: e.target.value }))
+                        }
+                      >
+                        <option value="B02">B02 - Consumo</option>
+                        <option value="B01">B01 - Credito fiscal</option>
+                        <option value="B14">B14 - Regimen especial</option>
+                        <option value="B15">B15 - Gubernamental</option>
+                      </select>
                     </div>
                   </div>
                   <Button type="submit" disabled={savingBusiness} className="w-full">
@@ -546,6 +631,44 @@ export default function TenantSettingsPage() {
                     ))}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/60 border-border/60">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Building2 className="h-4 w-4 text-primary" />
+                  Branding And Logo
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex h-40 items-center justify-center overflow-hidden rounded-xl border border-dashed border-border bg-background/40">
+                  {logoPreview ? (
+                    <Image
+                      src={logoPreview}
+                      alt="Tenant logo"
+                      width={220}
+                      height={160}
+                      unoptimized
+                      className="h-full w-full object-contain"
+                    />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No logo uploaded yet.</p>
+                  )}
+                </div>
+                <form onSubmit={handleBrandingUpload} className="space-y-3">
+                  <Input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    This logo will be used in Excel exports and branded documents.
+                  </p>
+                  <Button type="submit" disabled={savingBranding || !logoFile} className="w-full">
+                    {savingBranding ? "Uploading..." : "Upload Logo"}
+                  </Button>
+                </form>
               </CardContent>
             </Card>
 

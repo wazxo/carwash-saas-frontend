@@ -12,6 +12,7 @@ import {
   Search,
   AlertCircle,
   CheckCircle2,
+  Download,
 } from "lucide-react";
 
 export default function ReceiptsPage() {
@@ -227,8 +228,27 @@ export default function ReceiptsPage() {
             <p className="text-xs text-muted-foreground font-mono">
               {receipt.receiptNumber}
             </p>
+            {receipt.ncf ? (
+              <p className="text-xs text-primary font-mono">NCF: {receipt.ncf}</p>
+            ) : null}
+            {receipt.fiscalDocumentType ? (
+              <p className="text-xs text-muted-foreground">Tipo fiscal: {receipt.fiscalDocumentType}</p>
+            ) : null}
           </CardHeader>
           <CardContent className="p-6 pt-2 space-y-4">
+            <div className="grid gap-2 rounded-lg border border-border/60 bg-background/40 p-3 text-sm">
+              <div>
+                <p className="text-muted-foreground">Emisor</p>
+                <p className="font-medium">{receipt.issuerSnapshot?.legalName || receipt.issuerSnapshot?.businessName || "Carwash"}</p>
+                <p className="text-xs text-muted-foreground">RNC: {receipt.issuerSnapshot?.rnc || "Pendiente"}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Cliente</p>
+                <p className="font-medium">{receipt.customerSnapshot?.name || "Cliente"}</p>
+                <p className="text-xs text-muted-foreground">{receipt.customerSnapshot?.phone || receipt.customerSnapshot?.email || "Sin contacto"}</p>
+              </div>
+            </div>
+
             <div className="space-y-2 text-sm">
               {receipt.items.map((item, idx) => (
                 <div
@@ -280,6 +300,25 @@ export default function ReceiptsPage() {
             <p className="text-center text-xs text-muted-foreground pt-2">
               Issued at {new Date(receipt.issuedAt).toLocaleString()}
             </p>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full gap-2"
+              onClick={() => window.open(`/receipts/${receipt.id}/print`, "_blank")}
+            >
+              <ReceiptIcon className="h-4 w-4" />
+              Print Fiscal Invoice
+            </Button>
+
+            <Button
+              type="button"
+              className="w-full gap-2"
+              onClick={() => window.open(`/api/receipts/${receipt.id}/invoice.xlsx`, "_blank")}
+            >
+              <Download className="h-4 w-4" />
+              Download Fiscal Excel
+            </Button>
           </CardContent>
         </Card>
       )}

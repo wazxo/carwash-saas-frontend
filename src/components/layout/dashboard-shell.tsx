@@ -2,11 +2,13 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth/store";
 import { Sidebar } from "./sidebar";
 import { MobileNav } from "./mobile-nav";
 import { MobileHeader } from "./mobile-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { ApiResponse, User } from "@/lib/types";
 
 export function DashboardShell({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -14,14 +16,41 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    // Small delay to allow Zustand rehydration from localStorage
-    const timer = setTimeout(() => {
-      if (!useAuthStore.getState().accessToken) {
+    let cancelled = false;
+
+    async function syncSession() {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const store = useAuthStore.getState();
+      if (!store.accessToken) {
         router.replace("/login");
+        if (!cancelled) setChecked(true);
+        return;
       }
-      setChecked(true);
-    }, 100);
-    return () => clearTimeout(timer);
+
+      try {
+        const meRes = await apiFetch<ApiResponse<User>>("/auth/me", {
+          suppressAuthRedirect: true,
+        });
+        if (!cancelled) {
+          store.setAuth(meRes.data, {
+            accessToken: store.accessToken,
+            refreshToken: store.refreshToken || "",
+          });
+        }
+      } catch {
+        useAuthStore.getState().clearAuth();
+        router.replace("/login");
+      } finally {
+        if (!cancelled) setChecked(true);
+      }
+    }
+
+    void syncSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!checked) {

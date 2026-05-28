@@ -3,11 +3,13 @@
 import Image from "next/image";
 import { useEffect, useState, useMemo } from "react";
 import { apiFetch } from "@/lib/api/client";
+import { AuthenticatedImage } from "@/components/media/authenticated-image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { extractFileIdFromMediaUrl, normalizeMediaUrl } from "@/lib/utils";
 import type { Customer, Vehicle } from "@/lib/types";
 import {
   Car,
@@ -45,7 +47,7 @@ export default function VehiclesPage() {
     () =>
       vehiclePhoto
         ? URL.createObjectURL(vehiclePhoto)
-        : editingVehicle?.photoUrl || null,
+        : normalizeMediaUrl(editingVehicle?.photoUrl) || null,
     [vehiclePhoto, editingVehicle?.photoUrl]
   );
 
@@ -102,6 +104,8 @@ export default function VehiclesPage() {
         v.model.toLowerCase().includes(q)
     );
   }, [allVehicles, plateSearch]);
+
+  const editingVehicleFileId = extractFileIdFromMediaUrl(editingVehicle?.photoUrl);
 
   function resetForm() {
     setForm({
@@ -324,14 +328,24 @@ export default function VehiclesPage() {
                     </div>
                     <div className="flex h-36 items-center justify-center overflow-hidden rounded-xl border border-dashed border-border bg-background/40">
                       {photoPreview ? (
-                        <Image
-                          src={photoPreview}
-                          alt="Vehicle preview"
-                          width={160}
-                          height={144}
-                          unoptimized
-                          className="h-full w-full object-cover"
-                        />
+                        vehiclePhoto ? (
+                          <Image
+                            src={photoPreview}
+                            alt="Vehicle preview"
+                            width={160}
+                            height={144}
+                            unoptimized
+                            className="h-full w-full object-cover"
+                          />
+                        ) : editingVehicleFileId ? (
+                          <AuthenticatedImage
+                            fileId={editingVehicleFileId}
+                            alt="Vehicle preview"
+                            width={160}
+                            height={144}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : null
                       ) : (
                         <div className="flex flex-col items-center gap-2 text-muted-foreground">
                           <Camera className="h-6 w-6" />
@@ -404,14 +418,13 @@ export default function VehiclesPage() {
               className="bg-card/60 border-border/60 transition-colors hover:border-primary/30"
             >
               <CardContent className="p-4 space-y-3">
-                {v.photoUrl ? (
+                {extractFileIdFromMediaUrl(v.photoUrl) ? (
                   <div className="overflow-hidden rounded-xl border border-border/60 bg-background/30">
-                    <Image
-                      src={v.photoUrl}
+                    <AuthenticatedImage
+                      fileId={extractFileIdFromMediaUrl(v.photoUrl) || ""}
                       alt={`${v.plateNumber} vehicle photo`}
                       width={640}
                       height={320}
-                      unoptimized
                       className="h-40 w-full object-cover"
                     />
                   </div>

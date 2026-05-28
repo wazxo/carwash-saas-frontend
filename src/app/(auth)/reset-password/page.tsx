@@ -42,6 +42,9 @@ function ResetPasswordForm() {
       apiFetch<ApiResponse<{ message?: string }>>("/auth/reset-password", {
         method: "POST",
         body: JSON.stringify({ token, newPassword }),
+        auth: false,
+        suppressAuthRedirect: true,
+        suppressTokenRefresh: true,
       })
     );
 
