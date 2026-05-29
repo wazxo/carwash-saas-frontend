@@ -65,8 +65,11 @@ export interface PaginatedResponse<T> {
 export interface Customer {
   id: string;
   name: string;
+  legalName?: string;
   phone: string;
   email?: string;
+  taxId?: string;
+  taxIdType?: string;
   notes?: string;
   vehicles?: Vehicle[];
 }
@@ -97,6 +100,9 @@ export interface WashOrder {
   status: string;
   paymentStatus?: string;
   totalAmount: number;
+  taxAmount?: number;
+  discountAmount?: number;
+  surchargeAmount?: number;
   finalAmount: number;
   customerId: string;
   vehicleId: string;
@@ -143,6 +149,7 @@ export interface Receipt {
   subtotal: number;
   taxAmount: number;
   discountAmount: number;
+  surchargeAmount?: number;
   totalAmount: number;
   tipAmount: number;
   items: ReceiptItem[];

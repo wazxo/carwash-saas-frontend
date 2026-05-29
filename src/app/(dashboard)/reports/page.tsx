@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "@/lib/api/client";
+import { apiDownload, apiFetch } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -37,35 +37,6 @@ type PopularServiceRow = {
   _count: number;
 };
 
-function toCsv(rows: Array<Record<string, string | number | null | undefined>>) {
-  if (!rows.length) return "";
-  const headers = Object.keys(rows[0]);
-  const escape = (value: string | number | null | undefined) => {
-    const normalized = value == null ? "" : String(value);
-    if (/[",\n]/.test(normalized)) {
-      return `"${normalized.replace(/"/g, '""')}"`;
-    }
-    return normalized;
-  };
-  return [
-    headers.join(","),
-    ...rows.map((row) => headers.map((header) => escape(row[header])).join(",")),
-  ].join("\n");
-}
-
-function downloadCsv(filename: string, rows: Array<Record<string, string | number | null | undefined>>) {
-  const csv = toCsv(rows);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.setAttribute("download", filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
 export default function ReportsPage() {
   const today = new Date();
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
@@ -83,10 +54,17 @@ export default function ReportsPage() {
   const [staff, setStaff] = useState<StaffReportRow[]>([]);
   const [popularServices, setPopularServices] = useState<PopularServiceRow[]>([]);
 
-  function downloadWorkbook() {
+  async function downloadWorkbook() {
     const params = new URLSearchParams({ from, to });
     if (locationId) params.set("locationId", locationId);
-    window.open(`/api/reports/operations.xlsx?${params.toString()}`, "_blank");
+    try {
+      await apiDownload(
+        `/reports/operations.xlsx?${params.toString()}`,
+        `operational-report-${from}-to-${to}.xlsx`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to download workbook");
+    }
   }
 
   async function loadReports(nextFrom = from, nextTo = to, nextLocationId = locationId) {
@@ -179,6 +157,7 @@ export default function ReportsPage() {
             <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
             <p className="text-sm text-muted-foreground">
               Review revenue, operational throughput, and export the current report view to CSV.
+              Review revenue, throughput, and download a branded Excel workbook for operational reporting.
             </p>
           </div>
         </div>
@@ -244,14 +223,34 @@ export default function ReportsPage() {
         )}
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="bg-card/50">
+          <CardContent className="p-5">
+            <p className="text-sm text-muted-foreground">Workbook Output</p>
+            <p className="mt-1 text-lg font-semibold">Excel .xlsx only</p>
+            <p className="mt-2 text-sm text-muted-foreground">Branded workbook with summary, orders, payments, and services sheets.</p>
+          </CardContent>
+        </Card>
+        <Card className="bg-card/50">
+          <CardContent className="p-5">
+            <p className="text-sm text-muted-foreground">Branding</p>
+            <p className="mt-1 text-lg font-semibold">Tenant logo + RNC</p>
+            <p className="mt-2 text-sm text-muted-foreground">The workbook uses the tenant branding configured in settings.</p>
+          </CardContent>
+        </Card>
+        <Card className="bg-card/50">
+          <CardContent className="p-5">
+            <p className="text-sm text-muted-foreground">Accounting Focus</p>
+            <p className="mt-1 text-lg font-semibold">Subtotal + tax + surcharge</p>
+            <p className="mt-2 text-sm text-muted-foreground">Operational exports are structured for review, billing, and accounting handoff.</p>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Payment Methods</CardTitle>
-            <Button variant="outline" size="sm" onClick={() => downloadCsv(`payment-methods-${from}-to-${to}.csv`, paymentRows)}>
-              <Download className="mr-2 h-4 w-4" />
-              Export CSV
-            </Button>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -277,10 +276,6 @@ export default function ReportsPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Order Statuses</CardTitle>
-            <Button variant="outline" size="sm" onClick={() => downloadCsv(`order-statuses-${from}-to-${to}.csv`, statusRows)}>
-              <Download className="mr-2 h-4 w-4" />
-              Export CSV
-            </Button>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -305,23 +300,6 @@ export default function ReportsPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Staff Performance</CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                downloadCsv(
-                  `staff-performance-${from}-to-${to}.csv`,
-                  staff.map((row) => ({
-                    employeeId: row.employeeId,
-                    orders: row.orders,
-                    revenue: row.revenue,
-                  }))
-                )
-              }
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Export CSV
-            </Button>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -347,24 +325,6 @@ export default function ReportsPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Popular Services</CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                downloadCsv(
-                  `popular-services-${from}-to-${to}.csv`,
-                  popularServices.map((row) => ({
-                    serviceId: row.serviceId,
-                    quantity: row._sum.quantity || 0,
-                    revenue: row._sum.totalPrice || 0,
-                    rows: row._count,
-                  }))
-                )
-              }
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Export CSV
-            </Button>
           </CardHeader>
           <CardContent>
             {loading ? (

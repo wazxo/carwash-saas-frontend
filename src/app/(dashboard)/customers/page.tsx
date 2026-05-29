@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { validateDominicanTaxId } from "@/lib/fiscal";
 import type { Customer, PaginatedResponse } from "@/lib/types";
 import {
   Users,
@@ -31,8 +32,10 @@ export default function CustomersPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
     name: "",
+    legalName: "",
     phone: "",
     email: "",
+    taxId: "",
     notes: "",
   });
   const [submitting, setSubmitting] = useState(false);
@@ -54,8 +57,10 @@ export default function CustomersPage() {
           setCustomers(res.data);
           setMeta(res.meta);
         }
-      } catch (err: any) {
-        if (!cancelled) setError(err.message || "Failed to load customers");
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load customers");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -68,22 +73,30 @@ export default function CustomersPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    const taxValidation = validateDominicanTaxId(form.taxId);
+    if (form.taxId && !taxValidation.valid) {
+      setError("Tax ID must be a valid Dominican RNC or cédula");
+      return;
+    }
     setSubmitting(true);
     try {
       await apiFetch("/customers", {
         method: "POST",
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          taxIdType: taxValidation.type || undefined,
+        }),
       });
       setShowForm(false);
-      setForm({ name: "", phone: "", email: "", notes: "" });
+      setForm({ name: "", legalName: "", phone: "", email: "", taxId: "", notes: "" });
       setPage(1);
       const res = await apiFetch<PaginatedResponse<Customer>>(
         `/customers?page=1&limit=10`
       );
       setCustomers(res.data);
       setMeta(res.meta);
-    } catch (err: any) {
-      setError(err.message || "Failed to create customer");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create customer");
     } finally {
       setSubmitting(false);
     }
@@ -163,6 +176,28 @@ export default function CustomersPage() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="legalName">Legal Name</Label>
+                  <Input
+                    id="legalName"
+                    value={form.legalName}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, legalName: e.target.value }))
+                    }
+                    placeholder="Razón social"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="taxId">RNC / Cédula</Label>
+                  <Input
+                    id="taxId"
+                    value={form.taxId}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, taxId: e.target.value }))
+                    }
+                    placeholder="131234567 o 00112345678"
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>
                   <Input
                     id="notes"
@@ -218,6 +253,9 @@ export default function CustomersPage() {
                 Email
               </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                Fiscal
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                 Vehicles
               </th>
             </tr>
@@ -268,6 +306,9 @@ export default function CustomersPage() {
                     ) : (
                       <span className="text-muted-foreground/50">—</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {c.taxId ? `${c.taxIdType || "ID"}: ${c.taxId}` : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">

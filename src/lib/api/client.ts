@@ -67,3 +67,67 @@ export async function apiFetch<T>(
 
   return res.json();
 }
+
+export async function apiDownload(
+  path: string,
+  filename: string,
+  options: ApiFetchOptions = {}
+) {
+  const { auth = true, suppressAuthRedirect = false, suppressTokenRefresh = false, ...requestInit } = options;
+  const accessToken = useAuthStore.getState().accessToken;
+
+  const headers: Record<string, string> = {
+    Accept: "*/*",
+    ...(requestInit.headers as Record<string, string>),
+  };
+
+  if (auth && accessToken && !headers["Authorization"]) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...requestInit,
+    headers,
+  });
+
+  if (res.status === 401) {
+    const refreshToken = useAuthStore.getState().refreshToken;
+    if (!suppressTokenRefresh && refreshToken) {
+      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (refreshRes.ok) {
+        const data = await refreshRes.json();
+        const newToken = data.data?.accessToken ?? data.accessToken;
+        useAuthStore.getState().setAccessToken(newToken);
+        return apiDownload(path, filename, options);
+      }
+    }
+    const error = await res.json().catch(() => ({ message: "Unauthorized" }));
+    if (suppressAuthRedirect) {
+      throw new Error(error.message || "Unauthorized");
+    }
+    useAuthStore.getState().clearAuth();
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    throw new Error(error.message || "Session expired");
+  }
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(error.message || `HTTP ${res.status}`);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

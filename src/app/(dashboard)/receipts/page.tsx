@@ -17,6 +17,7 @@ import {
 
 export default function ReceiptsPage() {
   const [orderId, setOrderId] = useState("");
+  const [search, setSearch] = useState("");
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [paidOrders, setPaidOrders] = useState<WashOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
@@ -81,6 +82,15 @@ export default function ReceiptsPage() {
     }
   }
 
+  const filteredOrders = paidOrders.filter((order) => {
+    if (!search.trim()) return true;
+    const query = search.toLowerCase();
+    return [order.id, order.customer?.name || "", order.vehicle?.plateNumber || "", order.location?.name || ""]
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
@@ -93,6 +103,7 @@ export default function ReceiptsPage() {
           <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <div className="space-y-2">
               <p className="text-sm font-medium">Paid Orders</p>
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search invoice history..." />
               {ordersLoading ? (
                 <Skeleton className="h-10 w-full" />
               ) : (
@@ -102,7 +113,7 @@ export default function ReceiptsPage() {
                   onChange={(e) => setOrderId(e.target.value)}
                 >
                   <option value="">Select a paid order</option>
-                  {paidOrders.map((order) => (
+                  {filteredOrders.map((order) => (
                     <option key={order.id} value={order.id}>
                       #{order.id.slice(-6)} - {order.customer?.name || order.vehicle?.plateNumber || "Paid order"}
                     </option>
@@ -113,7 +124,7 @@ export default function ReceiptsPage() {
             <div className="space-y-2">
               <p className="text-sm font-medium">Quick Picks</p>
               <div className="flex flex-wrap gap-2">
-                {paidOrders.slice(0, 4).map((order) => (
+                {filteredOrders.slice(0, 4).map((order) => (
                   <Button
                     key={order.id}
                     type="button"
@@ -160,13 +171,13 @@ export default function ReceiptsPage() {
         </CardContent>
       </Card>
 
-      {!ordersLoading && paidOrders.length > 0 && !receipt && !loading && (
+      {!ordersLoading && filteredOrders.length > 0 && !receipt && !loading && (
         <Card className="bg-card/40 border-border/60">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Recent Paid Orders</CardTitle>
+            <CardTitle className="text-base">Invoice History</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {paidOrders.slice(0, 6).map((order) => (
+            {filteredOrders.slice(0, 10).map((order) => (
               <button
                 key={order.id}
                 type="button"

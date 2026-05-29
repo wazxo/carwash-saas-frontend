@@ -32,6 +32,7 @@ export default function FrontDeskPage() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [customerOrders, setCustomerOrders] = useState<WashOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [savingVehicle, setSavingVehicle] = useState(false);
@@ -63,6 +64,9 @@ export default function FrontDeskPage() {
     locationId: "",
     notes: "",
     items: [{ serviceId: "", quantity: 1 }] as OrderItemDraft[],
+    taxAmount: "0",
+    discountAmount: "0",
+    surchargeAmount: "0",
   });
   const [paymentForm, setPaymentForm] = useState({
     amount: "",
@@ -131,15 +135,26 @@ export default function FrontDeskPage() {
     if (!selectedCustomerId) return;
     let cancelled = false;
 
-    async function loadVehicles() {
+    async function loadCustomerData() {
       try {
-        const res = await apiFetch<{ data: Vehicle[] }>(
-          `/vehicles/customer/${selectedCustomerId}`
-        );
-        if (!cancelled) setVehicles(res.data);
+        const [vehiclesRes, ordersRes] = await Promise.all([
+          apiFetch<{ data: Vehicle[] }>(`/vehicles/customer/${selectedCustomerId}`),
+          apiFetch<{ data: WashOrder[] }>(`/wash-orders?page=1&limit=100`),
+        ]);
+        if (!cancelled) {
+          setVehicles(vehiclesRes.data);
+          setCustomerOrders(
+            ordersRes.data.filter(
+              (order) =>
+                order.customerId === selectedCustomerId &&
+                !["delivered", "cancelled"].includes(order.status)
+            )
+          );
+        }
       } catch (err) {
         if (!cancelled) {
           setVehicles([]);
+          setCustomerOrders([]);
           setError(
             err instanceof Error ? err.message : "Failed to load customer vehicles"
           );
@@ -147,7 +162,7 @@ export default function FrontDeskPage() {
       }
     }
 
-    void loadVehicles();
+    void loadCustomerData();
 
     return () => {
       cancelled = true;
@@ -191,6 +206,7 @@ export default function FrontDeskPage() {
     setSelectedCustomerId("");
     setSelectedVehicleId("");
     setVehicles([]);
+    setCustomerOrders([]);
     setCurrentOrder(null);
     setReceipt(null);
     setPaymentForm({ amount: "", method: "cash", tipAmount: "", fiscalDocumentType: "B02", customerLegalName: "", customerTaxId: "", customerEmail: "", customerPhone: "" });
@@ -198,6 +214,9 @@ export default function FrontDeskPage() {
       ...current,
       notes: "",
       items: [{ serviceId: "", quantity: 1 }],
+      taxAmount: "0",
+      discountAmount: "0",
+      surchargeAmount: "0",
     }));
     setVehicleForm({
       plateNumber: "",
@@ -309,6 +328,39 @@ export default function FrontDeskPage() {
     }));
   }
 
+  function loadOrderIntoForm(order: WashOrder) {
+    setCurrentOrder(order);
+    setSelectedVehicleId(order.vehicleId);
+    setOrderForm({
+      locationId: order.locationId,
+      notes: order.notes || "",
+      items: order.items.map((item) => ({ serviceId: item.serviceId, quantity: item.quantity })),
+      taxAmount: String(order.taxAmount ?? 0),
+      discountAmount: String(order.discountAmount ?? 0),
+      surchargeAmount: String(order.surchargeAmount ?? 0),
+    });
+    setPaymentForm((current) => ({
+      ...current,
+      amount: Math.max(0, Number(order.finalAmount) - (order.payments ?? []).reduce((sum, payment) => sum + Number(payment.amount), 0)).toFixed(2),
+      customerLegalName: selectedCustomer?.name || current.customerLegalName,
+      customerEmail: selectedCustomer?.email || current.customerEmail,
+      customerPhone: selectedCustomer?.phone || current.customerPhone,
+    }));
+  }
+
+  const draftSubtotal = useMemo(() => {
+    return orderForm.items.reduce((sum, item) => {
+      const service = services.find((entry) => entry.id === item.serviceId);
+      if (!service) return sum;
+      return sum + Number(service.basePrice) * item.quantity;
+    }, 0);
+  }, [orderForm.items, services]);
+
+  const draftTotal = Math.max(
+    0,
+    draftSubtotal + Number(orderForm.taxAmount || 0) + Number(orderForm.surchargeAmount || 0) - Number(orderForm.discountAmount || 0)
+  );
+
   async function handleCreateOrder(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedCustomerId || !selectedVehicleId) {
@@ -321,25 +373,36 @@ export default function FrontDeskPage() {
     setReceipt(null);
 
     try {
-      const res = await apiFetch<{ data: WashOrder }>("/wash-orders", {
-        method: "POST",
+      const response = await apiFetch<{ data: WashOrder }>(currentOrder ? `/wash-orders/${currentOrder.id}` : "/wash-orders", {
+        method: currentOrder ? "PATCH" : "POST",
         body: JSON.stringify({
           locationId: orderForm.locationId,
           customerId: selectedCustomerId,
           vehicleId: selectedVehicleId,
           notes: orderForm.notes,
           items: orderForm.items.filter((item) => item.serviceId),
+          taxAmount: Number(orderForm.taxAmount || 0),
+          discountAmount: Number(orderForm.discountAmount || 0),
+          surchargeAmount: Number(orderForm.surchargeAmount || 0),
         }),
       });
 
-      setCurrentOrder(res.data);
+      setCurrentOrder(response.data);
       setPaymentForm((current) => ({
         ...current,
-        amount: Number(res.data.finalAmount).toFixed(2),
+        amount: Number(response.data.finalAmount).toFixed(2),
         customerLegalName: selectedCustomer?.name || current.customerLegalName,
+        customerTaxId: selectedCustomer?.taxId || current.customerTaxId,
         customerEmail: selectedCustomer?.email || current.customerEmail,
         customerPhone: selectedCustomer?.phone || current.customerPhone,
       }));
+
+      const refreshedOrders = await apiFetch<{ data: WashOrder[] }>(`/wash-orders?page=1&limit=100`);
+      setCustomerOrders(
+        refreshedOrders.data.filter(
+          (order) => order.customerId === selectedCustomerId && !["delivered", "cancelled"].includes(order.status)
+        )
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create order");
     } finally {
@@ -590,6 +653,32 @@ export default function FrontDeskPage() {
               </div>
             </div>
 
+            <div className="space-y-2">
+              <Label>Open orders for this customer</Label>
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-border/60 p-2">
+                {customerOrders.map((order) => (
+                  <button
+                    key={order.id}
+                    type="button"
+                    onClick={() => loadOrderIntoForm(order)}
+                    className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${
+                      currentOrder?.id === order.id
+                        ? "border-primary bg-primary/10"
+                        : "border-border/60 bg-background/40 hover:border-primary/40"
+                    }`}
+                  >
+                    <p className="text-sm font-medium">Order #{order.id.slice(-6)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {order.status} • {order.paymentStatus || "pending"} • ${Number(order.finalAmount).toFixed(2)}
+                    </p>
+                  </button>
+                ))}
+                {selectedCustomerId && customerOrders.length === 0 && (
+                  <p className="px-2 py-4 text-sm text-muted-foreground">No open orders for this customer.</p>
+                )}
+              </div>
+            </div>
+
             <form onSubmit={handleCreateVehicle} className="space-y-3 rounded-xl border border-border/60 bg-background/40 p-4">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <Plus className="h-4 w-4 text-primary" />
@@ -785,7 +874,7 @@ export default function FrontDeskPage() {
                   </div>
                   <div className="mt-2 flex items-center justify-between border-t border-border pt-2 font-medium text-foreground">
                     <span>Estimated total</span>
-                    <span>${selectedOrderTotal.toFixed(2)}</span>
+                    <span>${draftTotal.toFixed(2)}</span>
                   </div>
                 </div>
 
@@ -796,6 +885,53 @@ export default function FrontDeskPage() {
                   }
                   placeholder="Order notes"
                 />
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>ITBIS</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={orderForm.taxAmount}
+                      onChange={(e) =>
+                        setOrderForm((current) => ({ ...current, taxAmount: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Discount</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={orderForm.discountAmount}
+                      onChange={(e) =>
+                        setOrderForm((current) => ({ ...current, discountAmount: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Surcharge</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={orderForm.surchargeAmount}
+                      onChange={(e) =>
+                        setOrderForm((current) => ({ ...current, surchargeAmount: e.target.value }))
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border/60 bg-background/40 p-3 text-sm">
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Subtotal</span>
+                    <span>${draftSubtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-muted-foreground">
+                    <span>Draft total</span>
+                    <span>${draftTotal.toFixed(2)}</span>
+                  </div>
+                </div>
 
                 <Button
                   type="submit"
@@ -808,7 +944,7 @@ export default function FrontDeskPage() {
                   }
                   className="w-full"
                 >
-                  {creatingOrder ? "Creating..." : "Create Order"}
+                  {creatingOrder ? "Saving..." : currentOrder ? "Update Order" : "Create Order"}
                 </Button>
               </form>
             </CardContent>
